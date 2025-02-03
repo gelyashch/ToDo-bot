@@ -9,6 +9,7 @@ import warnings
 warnings.filterwarnings("ignore", category=PTBUserWarning)
 
 AWAITING_TASK = 1
+AWAITING_WEEK_DAY = 2
 
 TASKS_FILE = "tasks.json"
 
@@ -33,6 +34,31 @@ def get_current_date_info():
     weekday = weekdays[now.weekday()]
     date = now.strftime("%d.%m.%Y")
     return weekday, date
+
+def get_week_range():
+    """Returns the start and end dates of the current week"""
+    now = datetime.datetime.now()
+    start_of_week = now - datetime.timedelta(days=now.weekday())
+    end_of_week = start_of_week + datetime.timedelta(days=6)
+    return start_of_week.strftime("%d.%m.%Y"), end_of_week.strftime("%d.%m.%Y")
+
+def get_tasks_for_week(user_id):
+    """Returns tasks for the current week, grouped by day"""
+    start_of_week, end_of_week = get_week_range()
+    start_date = datetime.datetime.strptime(start_of_week, "%d.%m.%Y")
+    end_date = datetime.datetime.strptime(end_of_week, "%d.%m.%Y")
+
+    user_tasks = tasks_by_user.get(user_id, {})
+    week_tasks = {}
+
+    current_date = start_date
+    while current_date <= end_date:
+        date_str = current_date.strftime("%d.%m.%Y")
+        if date_str in user_tasks:
+            week_tasks[date_str] = user_tasks[date_str]
+        current_date += datetime.timedelta(days=1)
+
+    return week_tasks
 
 def save_tasks_to_file():
     """Save tasks to JSON file"""
@@ -117,29 +143,104 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(message, reply_markup=reply_markup)
+    
+    elif query.data == 'create_week':
+        start_week, end_week = get_week_range()
+        keyboard = [
+            [
+                InlineKeyboardButton("Понедельник", callback_data='monday'),
+                InlineKeyboardButton("Вторник", callback_data='tuesday'),
+                InlineKeyboardButton("Среда", callback_data='wednesday')
+            ],
+            [
+                InlineKeyboardButton("Четверг", callback_data='thursday'),
+                InlineKeyboardButton("Пятница", callback_data='friday'),
+                InlineKeyboardButton("Суббота", callback_data='saturday'),
+                InlineKeyboardButton("Воскресенье", callback_data='sunday')
+            ],
+            [
+                InlineKeyboardButton("Вернуться назад", callback_data='back_to_start')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"Текущая неделя: {start_week} - {end_week}",
+            reply_markup=reply_markup
+        )
+        return AWAITING_WEEK_DAY
+
+    elif query.data in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']:
+        day = query.data
+        now = datetime.datetime.now()
+        start_of_week = now - datetime.timedelta(days=now.weekday())
+        day_offset = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(day)
+        selected_day = start_of_week + datetime.timedelta(days=day_offset)
+        selected_day_str = selected_day.strftime("%d.%m.%Y")
+        
+        context.user_data['selected_day'] = selected_day_str  
+
+        keyboard = [
+            [
+                InlineKeyboardButton("Создать дело", callback_data='create_task_for_day'),
+                InlineKeyboardButton("Вернуться назад", callback_data='back_to_start')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"Выбранный день: {day.capitalize()}, {selected_day_str}",
+            reply_markup=reply_markup
+        )
+        return AWAITING_TASK
+
+    elif query.data == 'create_task_for_day':
+        await query.edit_message_text("Введите ваше дельце и не откладывайте его!")
+        return AWAITING_TASK
+
+    elif query.data == 'list_week':
+        week_tasks = get_tasks_for_week(user_id)
+        if week_tasks:
+            tasks_text = ""
+            for date, tasks in week_tasks.items():
+                tasks_text += f"\n{date}:\n"
+                tasks_text += "\n".join(f"{i + 1}. {task}" for i, task in enumerate(tasks)) + "\n"
+            message = f"Ваши дела на неделю:\n{tasks_text}"
+        else:
+            message = "На этой неделе дел нет!"
+
+        keyboard = [
+            [
+                InlineKeyboardButton("Вернуться назад", callback_data='back_to_start')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(message, reply_markup=reply_markup)
 
 async def handle_task_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for task input"""
     task_text = update.message.text
-    weekday, date = get_current_date_info()
     user_id = str(update.message.from_user.id)  
+
+    if 'selected_day' in context.user_data:
+        selected_day = context.user_data['selected_day']
+    else:
+        selected_day = get_current_date_info()[1]  
 
     if user_id not in tasks_by_user:
         tasks_by_user[user_id] = {}
 
-    if date not in tasks_by_user[user_id]:
-        tasks_by_user[user_id][date] = []
-    tasks_by_user[user_id][date].append(task_text)
+    if selected_day not in tasks_by_user[user_id]:
+        tasks_by_user[user_id][selected_day] = []
+    tasks_by_user[user_id][selected_day].append(task_text)
 
     save_tasks_to_file()
 
-    tasks = tasks_by_user[user_id][date]
+    tasks = tasks_by_user[user_id][selected_day]
     tasks_text = "\n".join(f"{i + 1}. {task}" for i, task in enumerate(tasks))
-    message = f"{weekday}, {date}\nВаши дела:\n{tasks_text}"
+    message = f"День: {selected_day}\nВаши дела:\n{tasks_text}"
 
     keyboard = [
         [
-            InlineKeyboardButton("Создать еще дела", callback_data='create_task'),
+            InlineKeyboardButton("Создать еще дело", callback_data='create_task_for_day'),
             InlineKeyboardButton("Вернуться к началу", callback_data='back_to_start')
         ]
     ]
@@ -153,9 +254,15 @@ def main():
     application.add_handler(CommandHandler('start', start))
 
     conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_handler, pattern='^create_task$')],
+        entry_points=[
+            CallbackQueryHandler(button_handler, pattern='^create_task$'),
+            CallbackQueryHandler(button_handler, pattern='^create_week$'),
+            CallbackQueryHandler(button_handler, pattern='^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$'),
+            CallbackQueryHandler(button_handler, pattern='^create_task_for_day$')
+        ],
         states={
-            AWAITING_TASK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_task_input)]
+            AWAITING_TASK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_task_input)],
+            AWAITING_WEEK_DAY: [CallbackQueryHandler(button_handler)]
         },
         fallbacks=[],
     )

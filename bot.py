@@ -130,17 +130,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_tasks = tasks_by_user.get(user_id, {})  
         tasks = user_tasks.get(date, [])  
         if tasks:
-            tasks_text = "\n".join(f"{i + 1}. {task}" for i, task in enumerate(tasks))
+            tasks_text = ""
+            keyboard = []
+            for i, task in enumerate(tasks):
+                status = "✅" if task.get("completed", False) else "❌"
+                tasks_text += f"{i + 1}. {task['task']} {status}\n"
+                keyboard.append([
+                    InlineKeyboardButton(f"{i + 1}. {task['task']}", callback_data=f"toggle_{i}")
+                ])
             message = f"{weekday}, {date}\nВаши дела:\n{tasks_text}"
         else:
             message = f"{weekday}, {date}\nНа сегодня дел нет!"
+            keyboard = []
         
-        keyboard = [
-            [
-                InlineKeyboardButton("Создать дела", callback_data='create_task'),
-                InlineKeyboardButton("Вернуться назад", callback_data='back_to_start')
-            ]
-        ]
+        keyboard.append([
+            InlineKeyboardButton("Создать дело", callback_data='create_task'),
+            InlineKeyboardButton("Вернуться назад", callback_data='back_to_start')
+        ])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(message, reply_markup=reply_markup)
     
@@ -202,7 +208,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tasks_text = ""
             for date, tasks in week_tasks.items():
                 tasks_text += f"\n{date}:\n"
-                tasks_text += "\n".join(f"{i + 1}. {task}" for i, task in enumerate(tasks)) + "\n"
+                for i, task in enumerate(tasks):
+                    status = "✅" if task.get("completed", False) else "❌"
+                    tasks_text += f"{i + 1}. {task['task']} {status}\n"
             message = f"Ваши дела на неделю:\n{tasks_text}"
         else:
             message = "На этой неделе дел нет!"
@@ -212,6 +220,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("Вернуться назад", callback_data='back_to_start')
             ]
         ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(message, reply_markup=reply_markup)
+
+    elif query.data.startswith("toggle_"):
+        task_id = int(query.data.split("_")[1])
+        selected_day = context.user_data.get('selected_day', get_current_date_info()[1])
+        user_tasks = tasks_by_user.get(user_id, {}).get(selected_day, [])
+
+        if 0 <= task_id < len(user_tasks):
+            user_tasks[task_id]["completed"] = not user_tasks[task_id].get("completed", False)
+            save_tasks_to_file()
+
+        tasks_text = ""
+        keyboard = []
+        for i, task in enumerate(user_tasks):
+            status = "✅" if task.get("completed", False) else "❌"
+            tasks_text += f"{i + 1}. {task['task']} {status}\n"
+            keyboard.append([
+                InlineKeyboardButton(f"{i + 1}. {task['task']}", callback_data=f"toggle_{i}")
+            ])
+        message = f"День: {selected_day}\nВаши дела:\n{tasks_text}"
+
+        keyboard.append([
+            InlineKeyboardButton("Создать еще дело", callback_data='create_task_for_day'),
+            InlineKeyboardButton("Вернуться к началу", callback_data='back_to_start')
+        ])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(message, reply_markup=reply_markup)
 
@@ -230,20 +264,25 @@ async def handle_task_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if selected_day not in tasks_by_user[user_id]:
         tasks_by_user[user_id][selected_day] = []
-    tasks_by_user[user_id][selected_day].append(task_text)
+    tasks_by_user[user_id][selected_day].append({"task": task_text, "completed": False})
 
     save_tasks_to_file()
 
     tasks = tasks_by_user[user_id][selected_day]
-    tasks_text = "\n".join(f"{i + 1}. {task}" for i, task in enumerate(tasks))
+    tasks_text = ""
+    keyboard = []
+    for i, task in enumerate(tasks):
+        status = "✅" if task.get("completed", False) else "❌"
+        tasks_text += f"{i + 1}. {task['task']} {status}\n"
+        keyboard.append([
+            InlineKeyboardButton(f"{i + 1}. {task['task']}", callback_data=f"toggle_{i}")
+        ])
     message = f"День: {selected_day}\nВаши дела:\n{tasks_text}"
 
-    keyboard = [
-        [
-            InlineKeyboardButton("Создать еще дело", callback_data='create_task_for_day'),
-            InlineKeyboardButton("Вернуться к началу", callback_data='back_to_start')
-        ]
-    ]
+    keyboard.append([
+        InlineKeyboardButton("Создать еще дело", callback_data='create_task_for_day'),
+        InlineKeyboardButton("Вернуться к началу", callback_data='back_to_start')
+    ])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(message, reply_markup=reply_markup)

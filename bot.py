@@ -289,7 +289,7 @@ async def handle_task_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
-    application = Application.builder().token("7039799375:AAEIx9bc0yfgpjfhzEPsqnoT-f2DzEziyl8").build()
+    application = Application.builder().token("ВАШ_ТОКЕН").build()
     application.add_handler(CommandHandler('start', start))
 
     conv_handler = ConversationHandler(
